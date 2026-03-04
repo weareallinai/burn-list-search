@@ -25,6 +25,8 @@ const AddPage = () => {
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewReady, setPreviewReady] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{ updated: number; total: number } | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -108,6 +110,26 @@ const AddPage = () => {
       toast.error("Failed to save song");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    setBackfillResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("spotify-backfill");
+      if (error) throw error;
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      setBackfillResult({ updated: data.updated, total: data.total });
+      toast.success(`🎨 Updated album art for ${data.updated} of ${data.total} songs`);
+      queryClient.invalidateQueries({ queryKey: ["songs"] });
+    } catch (e: any) {
+      toast.error("Backfill failed: " + (e.message || "Unknown error"));
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -242,6 +264,30 @@ const AddPage = () => {
           )}
           Burn It
         </Button>
+
+        {/* Backfill section */}
+        <div className="mt-8 rounded-xl border border-border bg-card p-4">
+          <h3 className="mb-2 text-sm font-semibold text-foreground">Backfill Album Art</h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Fetch album art from Spotify for all songs that don't have it yet.
+          </p>
+          <Button
+            onClick={handleBackfill}
+            disabled={backfilling}
+            variant="secondary"
+            className="h-10"
+          >
+            {backfilling ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            {backfilling ? "Fetching…" : "Backfill Album Art"}
+          </Button>
+          {backfillResult && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              ✅ Updated {backfillResult.updated} of {backfillResult.total} songs
+            </p>
+          )}
+        </div>
       </main>
     </div>
   );
