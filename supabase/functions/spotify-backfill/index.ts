@@ -25,6 +25,10 @@ async function getSpotifyToken(): Promise<string> {
   return data.access_token;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -51,13 +55,13 @@ serve(async (req) => {
       });
     }
 
-    // Fetch one batch of 50
+    // Fetch a small batch (10 songs per invocation to stay safe)
     const { data: songs, error: fetchError } = await supabase
       .from("songs")
       .select("id, spotify_track_id")
       .not("spotify_track_id", "is", null)
       .is("album_art_url", null)
-      .limit(50);
+      .limit(10);
 
     if (fetchError) throw fetchError;
     if (!songs || songs.length === 0) {
@@ -67,39 +71,48 @@ serve(async (req) => {
     }
 
     const token = await getSpotifyToken();
-    const ids = songs.map((s) => s.spotify_track_id).join(",");
-
-    const res = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      console.error(`Spotify batch failed (${res.status}): ${body}`);
-      throw new Error(`Spotify API error: ${res.status}`);
-    }
-
-    const data = await res.json();
     let updated = 0;
+    let failed = 0;
 
-    for (const track of data.tracks) {
-      if (!track) continue;
-      const albumArt = track.album?.images?.[0]?.url;
-      if (!albumArt) continue;
+    // Fetch each track individually (like spotify-track function which works)
+    for (const song of songs) {
+      try {
+        const res = await fetch(`https://api.spotify.com/v1/tracks/${song.spotify_track_id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      const song = songs.find((s) => s.spotify_track_id === track.id);
-      if (!song) continue;
+        if (!res.ok) {
+          console.error(`Track ${song.spotify_track_id} failed: ${res.status}`);
+          failed++;
+          if (res.status === 429) {
+            // Rate limited - stop early, we'll pick up the rest next invocation
+            console.log("Rate limited, stopping early");
+            break;
+          }
+          continue;
+        }
 
-      const { error: updateError } = await supabase
-        .from("songs")
-        .update({ album_art_url: albumArt })
-        .eq("id", song.id);
+        const track = await res.json();
+        const albumArt = track.album?.images?.[0]?.url;
+        if (!albumArt) continue;
 
-      if (!updateError) updated++;
+        const { error: updateError } = await supabase
+          .from("songs")
+          .update({ album_art_url: albumArt })
+          .eq("id", song.id);
+
+        if (!updateError) updated++;
+
+        // Small delay between individual requests
+        await sleep(200);
+      } catch (e) {
+        console.error(`Error processing track ${song.spotify_track_id}: ${e.message}`);
+        failed++;
+      }
     }
 
     const newRemaining = remaining - updated;
-    return new Response(JSON.stringify({ updated, remaining: newRemaining, done: newRemaining <= 0 }), {
+    return new Response(JSON.stringify({ updated, remaining: newRemaining, failed, done: newRemaining <= 0 }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
