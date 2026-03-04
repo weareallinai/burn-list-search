@@ -35,6 +35,7 @@ const SearchPage = () => {
     <div className="min-h-screen bg-background">
       <Header />
       <main className="mx-auto max-w-2xl px-4 py-6">
+        <p className="mb-4 text-center text-sm font-medium text-muted-foreground tracking-wide uppercase">Motorcycle Tony's Music Club</p>
         <div className="relative mb-6">
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
           <Input
