@@ -35,7 +35,10 @@ const SearchPage = () => {
     <div className="min-h-screen bg-background">
       <Header />
       <main className="mx-auto max-w-2xl px-4 py-6">
-        <p className="mb-4 text-center text-sm font-medium text-muted-foreground tracking-wide uppercase">Motorcycle Tony's Music Club</p>
+        <div className="mb-6 text-center">
+          <h2 className="text-xl font-bold burn-text tracking-tight">Motorcycle Tony's Music Club</h2>
+          <div className="mx-auto mt-2 h-px w-16 burn-gradient rounded-full opacity-60" />
+        </div>
         <div className="relative mb-6">
           <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
           <Input
