@@ -25,6 +25,30 @@ async function getSpotifyToken(): Promise<string> {
   return data.access_token;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchBatchWithRetry(ids: string, token: string): Promise<any | null> {
+  const url = `https://api.spotify.com/v1/tracks?ids=${ids}`;
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const res = await fetch(url, { headers });
+  if (res.ok) return res.json();
+
+  const body = await res.text();
+  console.error(`Spotify batch failed (${res.status}): ${body}`);
+
+  if (res.status === 403 || res.status === 429) {
+    console.log("Retrying after 3s...");
+    await sleep(3000);
+    const retry = await fetch(url, { headers });
+    if (retry.ok) return retry.json();
+    console.error(`Retry also failed (${retry.status})`);
+  }
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -36,7 +60,6 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Get all songs with spotify_track_id but no album_art_url
     const { data: songs, error: fetchError } = await supabase
       .from("songs")
       .select("id, spotify_track_id")
@@ -52,22 +75,20 @@ serve(async (req) => {
 
     const token = await getSpotifyToken();
     let updated = 0;
+    let batchesSucceeded = 0;
+    let batchesFailed = 0;
     const batchSize = 50;
 
     for (let i = 0; i < songs.length; i += batchSize) {
       const batch = songs.slice(i, i + batchSize);
       const ids = batch.map((s) => s.spotify_track_id).join(",");
 
-      const res = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        console.error(`Spotify batch fetch failed: ${res.status}`);
+      const data = await fetchBatchWithRetry(ids, token);
+      if (!data) {
+        batchesFailed++;
         continue;
       }
-
-      const data = await res.json();
+      batchesSucceeded++;
 
       for (const track of data.tracks) {
         if (!track) continue;
@@ -84,9 +105,14 @@ serve(async (req) => {
 
         if (!updateError) updated++;
       }
+
+      // Delay between batches to avoid rate limiting
+      if (i + batchSize < songs.length) {
+        await sleep(1500);
+      }
     }
 
-    return new Response(JSON.stringify({ updated, total: songs.length }), {
+    return new Response(JSON.stringify({ updated, total: songs.length, batchesSucceeded, batchesFailed }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
