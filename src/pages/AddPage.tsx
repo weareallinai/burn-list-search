@@ -26,7 +26,7 @@ const AddPage = () => {
   const [saving, setSaving] = useState(false);
   const [previewReady, setPreviewReady] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<{ updated: number; total: number } | null>(null);
+  const [backfillProgress, setBackfillProgress] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -115,16 +115,23 @@ const AddPage = () => {
 
   const handleBackfill = async () => {
     setBackfilling(true);
-    setBackfillResult(null);
+    setBackfillProgress(null);
+    let totalUpdated = 0;
     try {
-      const { data, error } = await supabase.functions.invoke("spotify-backfill");
-      if (error) throw error;
-      if (data?.error) {
-        toast.error(data.error);
-        return;
+      while (true) {
+        const { data, error } = await supabase.functions.invoke("spotify-backfill");
+        if (error) throw error;
+        if (data?.error) {
+          toast.error(data.error);
+          break;
+        }
+        totalUpdated += data.updated;
+        setBackfillProgress(`Updated ${totalUpdated} songs so far… ${data.remaining} remaining`);
+        if (data.done) break;
+        // Wait 3 seconds between calls for fresh token / rate limit avoidance
+        await new Promise((r) => setTimeout(r, 3000));
       }
-      setBackfillResult({ updated: data.updated, total: data.total });
-      toast.success(`🎨 Updated album art for ${data.updated} of ${data.total} songs`);
+      toast.success(`🎨 Done! Updated album art for ${totalUpdated} songs.`);
       queryClient.invalidateQueries({ queryKey: ["songs"] });
     } catch (e: any) {
       toast.error("Backfill failed: " + (e.message || "Unknown error"));
@@ -282,9 +289,9 @@ const AddPage = () => {
             ) : null}
             {backfilling ? "Fetching…" : "Backfill Album Art"}
           </Button>
-          {backfillResult && (
+          {backfillProgress && (
             <p className="mt-2 text-xs text-muted-foreground">
-              ✅ Updated {backfillResult.updated} of {backfillResult.total} songs
+              {backfillProgress}
             </p>
           )}
         </div>
