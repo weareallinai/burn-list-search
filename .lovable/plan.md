@@ -1,27 +1,29 @@
 
 
-## Fix: Spotify Backfill 403 Rate Limiting
+## Fix: Spotify Backfill - Process One Batch Per Invocation
 
 ### Problem
-The edge function fires all 9 batch requests (50 tracks each) nearly simultaneously. Spotify rate-limits after the first batch, returning 403 for the rest. On retry, the token itself may be flagged, so all batches fail.
-
-### Root Cause
-The `for` loop sends requests as fast as possible. Even though they're `await`ed sequentially, there's no delay between them, and Spotify's rate limiter kicks in.
+The Spotify API is returning 403 on every batch. Once the token gets flagged for rate limiting, all subsequent requests in the same function invocation fail -- including retries. The current approach of processing all 365 songs in a single function call doesn't work.
 
 ### Solution
-Two changes to `supabase/functions/spotify-backfill/index.ts`:
-
-1. **Add a delay between batches** (1-2 seconds) to stay under Spotify's rate limit
-2. **Log the actual response body on 403** to confirm it's rate limiting (not a credentials issue)
-3. **Retry failed batches** with exponential backoff
+Split the work: the edge function processes **one batch of 50** per call and returns whether there are more songs remaining. The frontend loops, calling the function repeatedly with a delay between each call. Each invocation gets a fresh Spotify token, avoiding the rate-limit flag.
 
 ### Changes
 
 **`supabase/functions/spotify-backfill/index.ts`:**
-- Add a `sleep(ms)` helper
-- Insert `await sleep(1500)` between each batch iteration
-- On 403, wait longer (3s) and retry once before skipping
-- Return details on how many batches succeeded vs failed
+- Remove the batch loop -- fetch only the first 50 songs missing album art per invocation
+- Make a single Spotify API call per invocation
+- Return `{ updated, remaining, done }` so the frontend knows whether to call again
 
-No frontend changes needed -- the button and UI already work correctly. Once the edge function paces itself, clicking "Backfill Album Art" repeatedly will chip through the remaining 365 songs.
+**`src/pages/AddPage.tsx`:**
+- Change the backfill handler to call the function in a loop
+- Add a 3-second delay between calls
+- Show live progress (e.g., "Updated 50 of 365... Updated 100 of 365...")
+- Stop when the function returns `done: true` or `remaining: 0`
+
+### Why This Works
+- One Spotify API call per edge function invocation = no rate limiting
+- Fresh token each time = no flagged credentials
+- ~8 calls total, each taking ~2 seconds, with 3-second gaps = done in under a minute
+- No new database tables needed
 
