@@ -1,26 +1,27 @@
 
 
-## Backfill Album Art for All 415 Songs
+## Fix: Spotify Backfill 403 Rate Limiting
 
-Spotify can handle 415 calls easily — we just need to pace them to avoid hitting rate limits.
+### Problem
+The edge function fires all 9 batch requests (50 tracks each) nearly simultaneously. Spotify rate-limits after the first batch, returning 403 for the rest. On retry, the token itself may be flagged, so all batches fail.
 
-### Approach
+### Root Cause
+The `for` loop sends requests as fast as possible. Even though they're `await`ed sequentially, there's no delay between them, and Spotify's rate limiter kicks in.
 
-Create a new edge function `spotify-backfill` that:
+### Solution
+Two changes to `supabase/functions/spotify-backfill/index.ts`:
 
-1. Queries all songs that have a `spotify_track_id` but no `album_art_url`
-2. Fetches metadata from Spotify in batches of 20 (Spotify's `/tracks` endpoint supports up to 50 IDs per request via `GET /v1/tracks?ids=id1,id2,...`)
-3. Updates each song's `album_art_url` in the database
-4. Returns a summary of how many were updated
+1. **Add a delay between batches** (1-2 seconds) to stay under Spotify's rate limit
+2. **Log the actual response body on 403** to confirm it's rate limiting (not a credentials issue)
+3. **Retry failed batches** with exponential backoff
 
-### Why This Works
-- Spotify's "Get Several Tracks" endpoint accepts up to **50 track IDs in a single request**, so we only need ~9 API calls total for 415 songs
-- No rate limit concerns at all
+### Changes
 
-### Frontend
-- Add a "Backfill Album Art" button on the `/add` page (behind the passcode) that triggers the function and shows progress
+**`supabase/functions/spotify-backfill/index.ts`:**
+- Add a `sleep(ms)` helper
+- Insert `await sleep(1500)` between each batch iteration
+- On 403, wait longer (3s) and retry once before skipping
+- Return details on how many batches succeeded vs failed
 
-### Files to create/edit
-- **Create** `supabase/functions/spotify-backfill/index.ts` — batch fetch + update
-- **Edit** `src/pages/AddPage.tsx` — add backfill trigger button
+No frontend changes needed -- the button and UI already work correctly. Once the edge function paces itself, clicking "Backfill Album Art" repeatedly will chip through the remaining 365 songs.
 
