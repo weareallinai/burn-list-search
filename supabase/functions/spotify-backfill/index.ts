@@ -25,30 +25,6 @@ async function getSpotifyToken(): Promise<string> {
   return data.access_token;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function fetchBatchWithRetry(ids: string, token: string): Promise<any | null> {
-  const url = `https://api.spotify.com/v1/tracks?ids=${ids}`;
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const res = await fetch(url, { headers });
-  if (res.ok) return res.json();
-
-  const body = await res.text();
-  console.error(`Spotify batch failed (${res.status}): ${body}`);
-
-  if (res.status === 403 || res.status === 429) {
-    console.log("Retrying after 3s...");
-    await sleep(3000);
-    const retry = await fetch(url, { headers });
-    if (retry.ok) return retry.json();
-    console.error(`Retry also failed (${retry.status})`);
-  }
-  return null;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -60,59 +36,70 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Count total remaining
+    const { count: remaining, error: countError } = await supabase
+      .from("songs")
+      .select("id", { count: "exact", head: true })
+      .not("spotify_track_id", "is", null)
+      .is("album_art_url", null);
+
+    if (countError) throw countError;
+
+    if (!remaining || remaining === 0) {
+      return new Response(JSON.stringify({ updated: 0, remaining: 0, done: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Fetch one batch of 50
     const { data: songs, error: fetchError } = await supabase
       .from("songs")
       .select("id, spotify_track_id")
       .not("spotify_track_id", "is", null)
-      .is("album_art_url", null);
+      .is("album_art_url", null)
+      .limit(50);
 
     if (fetchError) throw fetchError;
     if (!songs || songs.length === 0) {
-      return new Response(JSON.stringify({ updated: 0, total: 0, message: "No songs need backfilling" }), {
+      return new Response(JSON.stringify({ updated: 0, remaining: 0, done: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const token = await getSpotifyToken();
-    let updated = 0;
-    let batchesSucceeded = 0;
-    let batchesFailed = 0;
-    const batchSize = 50;
+    const ids = songs.map((s) => s.spotify_track_id).join(",");
 
-    for (let i = 0; i < songs.length; i += batchSize) {
-      const batch = songs.slice(i, i + batchSize);
-      const ids = batch.map((s) => s.spotify_track_id).join(",");
+    const res = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-      const data = await fetchBatchWithRetry(ids, token);
-      if (!data) {
-        batchesFailed++;
-        continue;
-      }
-      batchesSucceeded++;
-
-      for (const track of data.tracks) {
-        if (!track) continue;
-        const albumArt = track.album?.images?.[0]?.url;
-        if (!albumArt) continue;
-
-        const song = batch.find((s) => s.spotify_track_id === track.id);
-        if (!song) continue;
-
-        const { error: updateError } = await supabase
-          .from("songs")
-          .update({ album_art_url: albumArt })
-          .eq("id", song.id);
-
-        if (!updateError) updated++;
-      }
-
-      // Delay between batches to avoid rate limiting
-      if (i + batchSize < songs.length) {
-        await sleep(1500);
-      }
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`Spotify batch failed (${res.status}): ${body}`);
+      throw new Error(`Spotify API error: ${res.status}`);
     }
 
-    return new Response(JSON.stringify({ updated, total: songs.length, batchesSucceeded, batchesFailed }), {
+    const data = await res.json();
+    let updated = 0;
+
+    for (const track of data.tracks) {
+      if (!track) continue;
+      const albumArt = track.album?.images?.[0]?.url;
+      if (!albumArt) continue;
+
+      const song = songs.find((s) => s.spotify_track_id === track.id);
+      if (!song) continue;
+
+      const { error: updateError } = await supabase
+        .from("songs")
+        .update({ album_art_url: albumArt })
+        .eq("id", song.id);
+
+      if (!updateError) updated++;
+    }
+
+    const newRemaining = remaining - updated;
+    return new Response(JSON.stringify({ updated, remaining: newRemaining, done: newRemaining <= 0 }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
