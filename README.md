@@ -1,6 +1,6 @@
 # 🔥 Burn List
 
-**The song tracker for Motorcycle Tony's Music Club.**
+**The song tracker with house rules for Music League.**
 
 ## About
 
