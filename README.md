@@ -4,7 +4,7 @@
 
 ## About
 
-Burn List is where the crew logs the tracks they're burning — the songs stuck on repeat, the ones you can't stop playing. Search the list, add your own picks, and see album art pulled straight from Spotify.
+Burn List is where your Music League crew logs the tracks they're burning — no repeat artists per season, and no repeat songs ever. Search the list, add your own picks, and see album art pulled straight from Spotify.
 
 ## Features
 
