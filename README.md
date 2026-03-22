@@ -2,6 +2,8 @@
 
 **The song tracker with house rules for Music League.**
 
+View Demo: https://burn-list-search.lovable.app
+
 ## About
 
 Burn List is where your Music League crew logs the tracks they're burning — no repeat artists per season, and no repeat songs ever. Search the list, add your own picks, and see album art pulled straight from Spotify.
