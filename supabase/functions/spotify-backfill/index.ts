@@ -106,7 +106,7 @@ serve(async (req) => {
         // Small delay between individual requests
         await sleep(200);
       } catch (e) {
-        console.error(`Error processing track ${song.spotify_track_id}: ${e.message}`);
+        console.error(`Error processing track ${song.spotify_track_id}: ${(e as Error).message}`);
         failed++;
       }
     }
@@ -116,7 +116,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
+    return new Response(JSON.stringify({ error: (e as Error).message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
