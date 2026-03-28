@@ -1,24 +1,24 @@
 
 
-# Update README with a proper project description
+# Add sorting to Burn List + fix build errors
 
-## What changes
+## Changes
 
-Replace the entire README with a custom write-up for **Burn List** — the song-tracking app for Motorcycle Tony's Music Club.
+### 1. Fix build errors in edge functions
+Add proper error typing (`(e as Error).message`) in `spotify-backfill/index.ts` and `spotify-track/index.ts`.
 
-### New README structure
+### 2. Add sort toggle to SearchPage
+Add a sort control (using a ToggleGroup or small button group) below the search bar with three options:
+- **Newest** (default, current behavior)
+- **Title A-Z**
+- **Artist A-Z**
 
-1. **Title & tagline** — "Burn List" with a one-liner about what it does
-2. **About** — A short paragraph: a fire-themed song tracker where members submit tracks they're burning (loving), searchable with album art pulled from Spotify
-3. **Features** — Bullet list:
-   - Search songs by title or artist
-   - Album art auto-fetched via Spotify API
-   - Add songs with a passcode-protected form
-   - Batch backfill for missing artwork
-   - Dark, fire-themed UI
-4. **Tech stack** — Vite, React, TypeScript, Tailwind CSS, shadcn/ui, Lovable Cloud (backend + database)
-5. **Live site** — Link to `https://burn-list-search.lovable.app`
-6. **Local development** — Keep the clone/install/run steps (cleaned up)
+The sorting will be applied client-side using `useMemo` on the already-fetched songs list. No database changes needed.
 
-All boilerplate Lovable sections (custom domain FAQ, multiple editing methods, etc.) will be removed.
+Genre sorting is not currently possible since the `songs` table has no `genre` column — we'd need to add that column and populate it (potentially via Spotify API). That can be a follow-up.
+
+### Files to edit
+- `src/pages/SearchPage.tsx` — add sort state + toggle UI + sort logic in the `useMemo`
+- `supabase/functions/spotify-backfill/index.ts` — fix `e.message` type errors
+- `supabase/functions/spotify-track/index.ts` — fix `e.message` type error
 
